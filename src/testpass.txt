@@ -4,7 +4,6 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include <algorithm>
-#include <sstream>
 
 #include "Noelle.hpp"
 
@@ -39,56 +38,122 @@ namespace {
        * (e.g., Loop Dependence Graph, SCCDAG)
        */
       auto loops = noelle.getLoops();
-      auto PDG = noelle.getProgramDependenceGraph();
       //auto loops = noelle.getLoops(mainF);
-      
-      std::unordered_set<std::string> dependence_set;
 
       /*
        * Print loop induction variables and invariant.
        */
-      int count = 1;
       for (auto loop : *loops){
+
         /*
          * Print the first instruction the loop executes.
          */
         auto LS = loop->getLoopStructure();
-        auto loopid = loop->getID();
-        errs() << "This is Loop " << loopid << " in function " << LS->getFunction()->getName() << "\n";
+        auto entryInst = LS->getEntryInstruction();
+        errs() << "This is a new Loop" << "\n";
+        errs() << "Loop " << *entryInst << "\n";
 
-        auto instlist = LS->getInstructions();
-        for(auto inst : instlist)
-          errs() << "    " << *inst << "\n";
+        /*
+         * Print some information about the loop.
+         */
+        errs() << " Function = " << LS->getFunction()->getName() << "\n";
+        errs() << " Nesting level = " << LS->getNestingLevel() << "\n";
+        errs() << " This loop has " << LS->getNumberOfSubLoops() << " sub-loops (including sub-loops of sub-loops)\n";
 
-        for(auto inst : instlist){
-          for(auto loop_compare: *loops){
-            if(loop == loop_compare)
-              continue;
-            auto LS_compare = loop_compare->getLoopStructure();
-            auto instlist_compare = LS_compare->getInstructions();
-            auto loopid_compare = loop_compare->getID();
-            for(auto inst_compare: instlist_compare){
-              // get dependence information
-              auto dependence = PDG->getDependences(inst, inst_compare);
-              if(!dependence.empty()) {
-                std::ostringstream oss;
-                oss << loopid << " to " << loopid_compare;
-                std::string temp = oss.str();
-                dependence_set.insert(temp);
-              }
-              //for(auto dep: dependence)
-              //  errs() << "Dependence exists from  " << loopid//*inst
-              //    << " to " << loopid_compare/**inst_compare*/ << ": " << dep << "\n"; 
-            }
-          }
+        /*
+         * Induction variables.
+         */
+        errs() << " Induction variables\n";
+        auto IVM = loop->getInductionVariableManager();
+        auto GIV = IVM->getLoopGoverningInductionVariable(*LS);
+        if (GIV != nullptr){
+          errs() << "   GIV: " << *GIV->getLoopEntryPHI()  << "\n";
+        }
+        auto IVs = IVM->getInductionVariables(*LS);
+        for (auto IV : IVs){
+          errs() << "   IV: " << *IV->getLoopEntryPHI() << "\n";
         }
 
-        count++;
+        /*
+         * Invariants.
+         */
+        errs() << " Invariants\n";
+        auto IM = loop->getInvariantManager();
+        for (auto inv : IM->getLoopInstructionsThatAreLoopInvariants()){
+          errs() << "   " << *inv << "\n";
+        }
+        
+        /*
+         * Trip count.
+         */
+        if (loop->doesHaveCompileTimeKnownTripCount()){
+          errs() << " Trip count = " << loop->getCompileTimeTripCount() << "\n";
+        }
+
+        /*
+         * Dependences.
+         */
+        auto LDG = loop->getLoopDG();
+
+        /*
+         * SCCDAG
+         */
+        errs() << " SCCDAG\n";
+        auto sccManager = loop->getSCCManager();
+        auto SCCDAG = sccManager->getSCCDAG();
+
+        auto sccIterator = [sccManager](SCC *scc) -> bool {
+
+          /*
+           * Check if @scc is a single instruction
+           */
+          if (!scc->hasCycle()){
+            return false;
+          }
+
+          /*
+           * We found a new SCC.
+           */
+          errs() << "   New SCC\n";
+
+          /*
+           * Print the instructions that compose the SCC.
+           */
+          errs() << "     Instructions:\n";
+          auto mySCCIter = [](Instruction *i) -> bool {
+            errs() << "       " << *i << "\n";
+            return false;
+          };
+          scc->iterateOverInstructions(mySCCIter);
+
+          /*
+           * Fetch the SCC information.
+           */
+          auto sccInfo = sccManager->getSCCAttrs(scc);
+          if (sccInfo->isInductionVariableSCC()){
+            errs() << "     It is due to the computation of an induction variable\n";
+
+          } else if (sccInfo->canExecuteReducibly()){
+            errs() << "     It can be reduced\n";
+
+          } else if (sccInfo->canExecuteIndependently()){
+            errs() << "     It doesn't have loop-carried data dependences\n";
+
+          } else if (sccInfo->mustExecuteSequentially()){
+            errs() << "     It must be executed sequentially\n";
+
+          } else {
+            errs() << "     It can run in parallel\n";
+          }
+
+          return false;
+        };
+
+        SCCDAG->iterateOverSCCs(sccIterator);
+
       }
       errs() << "\n";
 
-      for(auto iter: dependence_set)
-        errs() << "There is a dependence from Loop " << iter << "\n";
       /*
        * Fetch the loops with only the loop structure abstraction.
        */

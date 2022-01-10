@@ -27,6 +27,10 @@ link_directories(${LLVM_LIBRARY_DIRS})
 # Prepare the pass to be included in the source tree
 list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 include(AddLLVM)
+include_directories(
+                     /u/NAS_SCRATCH/yc0769/install/noelle-install-release/include/scaf
+                     /u/NAS_SCRATCH/yc0769/install/noelle-install-release/include
+                     /u/NAS_SCRATCH/yc0769/install/noelle-install-release//include/svf)
 
 # Pass
 add_subdirectory(src)
